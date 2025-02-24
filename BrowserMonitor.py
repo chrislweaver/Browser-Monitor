@@ -895,7 +895,7 @@ def select_monitoring_area():
 # Initialize tkinter application
 root = tk.Tk()
 root.title("Browser Monitor")
-root.geometry("800x400")
+root.geometry("800x475")
 root.configure(bg="#f8f9fa")
 
 # Header Title
@@ -913,8 +913,9 @@ main_button_frame.pack(pady=10)
 
 # First row of buttons
 first_row_frame = tk.Frame(main_button_frame, bg="#f8f9fa")
-first_row_frame.pack(pady=(15, 15))
+first_row_frame.pack(pady=(15, 15))  # Equal padding top and bottom
 
+# Core functionality buttons
 tk.Button(first_row_frame, 
          text="Select Window", 
          command=select_window, 
@@ -924,7 +925,7 @@ tk.Button(first_row_frame,
          relief="flat", 
          cursor="hand2", 
          padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
+         pady=5).pack(side=tk.LEFT, padx=20)  # Increased padding between buttons
 
 tk.Button(first_row_frame, 
          text="Start Monitoring", 
@@ -935,7 +936,7 @@ tk.Button(first_row_frame,
          relief="flat", 
          cursor="hand2", 
          padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
+         pady=5).pack(side=tk.LEFT, padx=20)
 
 tk.Button(first_row_frame, 
          text="Stop Monitoring", 
@@ -946,45 +947,13 @@ tk.Button(first_row_frame,
          relief="flat", 
          cursor="hand2", 
          padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
-
-tk.Button(first_row_frame, 
-         text="Sound Test", 
-         command=play_sound, 
-         font=("Arial", 10), 
-         bg="#6c757d", 
-         fg="white", 
-         relief="flat", 
-         cursor="hand2", 
-         padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
-
-tk.Button(first_row_frame, 
-         text="Select Monitor Area", 
-         command=select_monitoring_area, 
-         font=("Arial", 10), 
-         bg="#17a2b8", 
-         fg="white", 
-         relief="flat", 
-         cursor="hand2", 
-         padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
+         pady=5).pack(side=tk.LEFT, padx=20)
 
 # Second row of buttons
 second_row_frame = tk.Frame(main_button_frame, bg="#f8f9fa")
-second_row_frame.pack(pady=(15, 0))
+second_row_frame.pack(pady=(15, 15))  # Equal padding top and bottom
 
-tk.Button(second_row_frame, 
-         text="Show/Hide Monitor Area", 
-         command=toggle_area_highlight, 
-         font=("Arial", 10), 
-         bg="#6c757d", 
-         fg="white", 
-         relief="flat", 
-         cursor="hand2", 
-         padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
-
+# Telegram related buttons
 tk.Button(second_row_frame, 
          text="Telegram Setup", 
          command=setup_telegram_config, 
@@ -994,7 +963,7 @@ tk.Button(second_row_frame,
          relief="flat", 
          cursor="hand2", 
          padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
+         pady=5).pack(side=tk.LEFT, padx=20)
 
 tk.Button(second_row_frame, 
          text="View Telegram Config", 
@@ -1005,7 +974,7 @@ tk.Button(second_row_frame,
          relief="flat", 
          cursor="hand2", 
          padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
+         pady=5).pack(side=tk.LEFT, padx=20)
 
 tk.Button(second_row_frame, 
          text="Test Telegram", 
@@ -1016,9 +985,47 @@ tk.Button(second_row_frame,
          relief="flat", 
          cursor="hand2", 
          padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
+         pady=5).pack(side=tk.LEFT, padx=20)
 
-tk.Button(second_row_frame, 
+# Third row of buttons
+third_row_frame = tk.Frame(main_button_frame, bg="#f8f9fa")
+third_row_frame.pack(pady=(15, 15))  # Equal padding top and bottom
+
+# Area selection and utility buttons
+tk.Button(third_row_frame, 
+         text="Select Area", 
+         command=select_monitoring_area, 
+         font=("Arial", 10), 
+         bg="#17a2b8", 
+         fg="white", 
+         relief="flat", 
+         cursor="hand2", 
+         padx=10, 
+         pady=5).pack(side=tk.LEFT, padx=20)
+
+tk.Button(third_row_frame, 
+         text="Show/Hide Area", 
+         command=toggle_area_highlight, 
+         font=("Arial", 10), 
+         bg="#6c757d", 
+         fg="white", 
+         relief="flat", 
+         cursor="hand2", 
+         padx=10, 
+         pady=5).pack(side=tk.LEFT, padx=20)
+
+tk.Button(third_row_frame, 
+         text="Sound Test", 
+         command=play_sound, 
+         font=("Arial", 10), 
+         bg="#6c757d", 
+         fg="white", 
+         relief="flat", 
+         cursor="hand2", 
+         padx=10, 
+         pady=5).pack(side=tk.LEFT, padx=20)
+
+tk.Button(third_row_frame, 
          text="Exit", 
          command=root.quit, 
          font=("Arial", 10), 
@@ -1027,7 +1034,7 @@ tk.Button(second_row_frame,
          relief="flat", 
          cursor="hand2", 
          padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
+         pady=5).pack(side=tk.LEFT, padx=20)
 
 # Status Indicator Section
 status_frame = tk.Frame(root, bg="#f8f9fa")
