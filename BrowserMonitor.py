@@ -355,46 +355,39 @@ def set_selected_window(window, selection_window):
         fg="black",
     )
     selection_window.destroy()
+
 def capture_window(window):
-    """Capture a screenshot of the selected window."""
+    """Capture a screenshot of the selected window, working even with display off."""
     if not window:
         return None
     try:
-        # Add error checking for window state
-        if not window.isMinimized:
-            window.activate()
-            time.sleep(0.5)  # Reduced sleep time
+        # Direct screen capture without window activation
+        with mss.mss() as sct:
+            try:
+                # Get window coordinates
+                left = max(0, window.left)
+                top = max(0, window.top)
+                width = window.width
+                height = window.height
 
-            # Ensure coordinates are positive
-            left = max(0, window.left)
-            top = max(0, window.top)
-            width = window.width
-            height = window.height
+                # Create monitor dict for capture
+                monitor = {
+                    "left": left,
+                    "top": top,
+                    "width": width,
+                    "height": height
+                }
 
-            # Capture screenshot of the selected window
-            with mss.mss() as sct:
-                monitor = {"left": left, "top": top, "width": width, "height": height}
-                try:
-                    screenshot = sct.grab(monitor)
-                    img = Image.frombytes("RGB", (screenshot.width, screenshot.height), screenshot.rgb)
-                    return img
-                except Exception as e:
-                    print(f"Screenshot capture error: {e}")
-                    return None
-    except Exception as e:
-        print(f"Window activation error: {e}")
-        # Fallback capture attempt
-        try:
-            with mss.mss() as sct:
-                monitor = {"left": window.left, "top": window.top, 
-                          "width": window.width, "height": window.height}
+                # Capture without trying to activate window
                 screenshot = sct.grab(monitor)
                 img = Image.frombytes("RGB", (screenshot.width, screenshot.height), screenshot.rgb)
                 return img
-        except Exception as e:
-            print(f"Fallback capture error: {e}")
-            return None
-    return None
+            except Exception as e:
+                print(f"Screenshot capture error: {e}")
+                return None
+    except Exception as e:
+        print(f"Capture error: {e}")
+        return None
 
 def divide_image_into_tiles(image, tile_size):
     """Divide the screenshot into smaller tiles (regions) for more granular comparison."""
@@ -418,7 +411,7 @@ def calculate_image_difference(img1, img2):
         return 0
 
 def monitor_window():
-    """Continuously monitor the selected window for visual changes."""
+    """Continuously monitor the selected window or area for visual changes."""
     global monitoring, last_screenshot
 
     if not selected_window:
@@ -426,49 +419,86 @@ def monitor_window():
         return
 
     # Capture the initial screenshot for comparison
-    last_screenshot = capture_window(selected_window)
-
-    if last_screenshot is None:
+    full_screenshot = capture_window(selected_window)
+    if full_screenshot is None:
         messagebox.showerror("Error", "Could not capture the selected window.")
         return
 
+    # If area is selected, crop the screenshot
+    if selected_area:
+        last_screenshot = full_screenshot.crop(selected_area)
+    else:
+        last_screenshot = full_screenshot
+
+    consecutive_failures = 0  # Track consecutive capture failures
+    MAX_FAILURES = 3  # Maximum number of consecutive failures before showing error
+
     while monitoring:
-        time.sleep(1)  # Check every 1 second
+        try:
+            time.sleep(1)  # Check every 1 second
 
-        current_screenshot = capture_window(selected_window)
-        if not monitoring or current_screenshot is None:
-            break
+            current_full_screenshot = capture_window(selected_window)
+            if not monitoring:
+                break
 
-        # Divide the images into tiles for comparison
-        tile_size = 100  # Adjust tile size based on desired granularity
-        last_tiles = divide_image_into_tiles(last_screenshot, tile_size)
-        current_tiles = divide_image_into_tiles(current_screenshot, tile_size)
+            if current_full_screenshot is None:
+                consecutive_failures += 1
+                if consecutive_failures >= MAX_FAILURES:
+                    print("Multiple capture failures, but continuing to monitor...")
+                continue
+            else:
+                consecutive_failures = 0  # Reset counter on successful capture
 
-        # Create a copy of the current screenshot for overlay
-        overlay_image = current_screenshot.copy()
-        draw = ImageDraw.Draw(overlay_image)
-        significant_change_detected = False
+            # If area is selected, crop the current screenshot
+            if selected_area:
+                current_screenshot = current_full_screenshot.crop(selected_area)
+            else:
+                current_screenshot = current_full_screenshot
 
-        # Check each tile for visual differences
-        for (box1, last_tile), (box2, current_tile) in zip(last_tiles, current_tiles):
-            diff = calculate_image_difference(last_tile, current_tile)
-            CHANGE_THRESHOLD = 10  # Set tolerance for differences
-            if diff > CHANGE_THRESHOLD:
-                significant_change_detected = True
-                print(f"Significant visual change detected in region {box1}: {diff}")
-                # Highlight the changed region on the overlay image
-                draw.rectangle(box1, outline="red", width=3)
+            # Divide the images into tiles for comparison
+            tile_size = 100  # Adjust tile size based on desired granularity
+            last_tiles = divide_image_into_tiles(last_screenshot, tile_size)
+            current_tiles = divide_image_into_tiles(current_screenshot, tile_size)
 
-        if significant_change_detected:
-            play_sound()
-            send_telegram_notification(overlay_image)
+            # Create a copy of the current screenshot for overlay
+            overlay_image = current_screenshot.copy()
+            draw = ImageDraw.Draw(overlay_image)
+            significant_change_detected = False
 
-            # Stop monitoring and display the overlay
-            monitoring = False
-            update_status_indicator(False)
-            display_overlay(overlay_image)
+            # Check each tile for visual differences
+            for (box1, last_tile), (box2, current_tile) in zip(last_tiles, current_tiles):
+                diff = calculate_image_difference(last_tile, current_tile)
+                CHANGE_THRESHOLD = 10  # Set tolerance for differences
+                if diff > CHANGE_THRESHOLD:
+                    significant_change_detected = True
+                    print(f"Significant visual change detected in region {box1}: {diff}")
+                    # Highlight the changed region on the overlay image
+                    draw.rectangle(box1, outline="red", width=3)
 
-        last_screenshot = current_screenshot
+            if significant_change_detected:
+                play_sound()
+                # If using selected area, create full screenshot with highlighted area
+                if selected_area:
+                    full_overlay = current_full_screenshot.copy()
+                    draw = ImageDraw.Draw(full_overlay)
+                    draw.rectangle(selected_area, outline="blue", width=2)  # Show monitored area
+                    # Copy the changes onto the full screenshot
+                    full_overlay.paste(overlay_image, (selected_area[0], selected_area[1]))
+                    overlay_image = full_overlay
+
+                send_telegram_notification(overlay_image)
+
+                # Stop monitoring and display the overlay
+                monitoring = False
+                update_status_indicator(False)
+                display_overlay(overlay_image)
+
+            last_screenshot = current_screenshot
+
+        except Exception as e:
+            print(f"Error in monitoring loop: {e}")
+            time.sleep(1)  # Wait before retrying
+            continue
 
 def select_monitoring_area():
     """Allow user to select a specific area of the window to monitor."""
