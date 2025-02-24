@@ -468,7 +468,7 @@ def monitor_window():
         last_screenshot = current_screenshot
 
 def display_overlay(overlay_image):
-    """Display the overlayed screenshot with highlighted changes in a tkinter window."""
+    """Display the overlayed screenshot with highlighted changes and start auto-resume countdown."""
     root.deiconify()
     root.lift()
     root.update()
@@ -477,83 +477,105 @@ def display_overlay(overlay_image):
     overlay_window.title("Visual Changes Highlighted")
     overlay_window.attributes("-topmost", True)
 
+    # Main frame
+    main_frame = tk.Frame(overlay_window)
+    main_frame.pack(fill=tk.BOTH, expand=True)
+
+    # Image display
     overlay_photo = ImageTk.PhotoImage(overlay_image)
-    overlay_label = tk.Label(overlay_window, image=overlay_photo)
+    overlay_label = tk.Label(main_frame, image=overlay_photo)
     overlay_label.image = overlay_photo
     overlay_label.pack()
 
-    def on_overlay_close():
-        overlay_window.destroy()
-        prompt_restart_monitoring()
+    # Countdown frame
+    countdown_frame = tk.Frame(overlay_window, bg="#f8f9fa")
+    countdown_frame.pack(fill='x', pady=5)
 
-    overlay_window.protocol("WM_DELETE_WINDOW", on_overlay_close)
+    countdown_var = tk.StringVar()
+    countdown_label = tk.Label(countdown_frame, 
+                             textvariable=countdown_var, 
+                             font=("Arial", 10),
+                             bg="#f8f9fa")
+    countdown_label.pack()
+
+    user_response = {'action': None}
+
+    def on_window_close():
+        user_response['action'] = 'closed'
+        overlay_window.destroy()
+
+    def update_countdown(seconds_left):
+        if seconds_left > 0 and user_response['action'] is None:
+            countdown_var.set(f"Auto-resuming monitoring in {seconds_left} seconds...")
+            overlay_window.after(1000, lambda: update_countdown(seconds_left - 1))
+        elif user_response['action'] is None:
+            # Auto-resume if user hasn't closed the window
+            user_response['action'] = 'timeout'
+            overlay_window.destroy()
+
+    # Start countdown
+    update_countdown(20)
+
+    # Set window close handler
+    overlay_window.protocol("WM_DELETE_WINDOW", on_window_close)
+
+    # Wait for window to close
+    overlay_window.wait_window()
+
+    # Handle the result
+    if user_response['action'] == 'closed':
+        # User closed the window, show prompt
+        prompt_restart_monitoring()
+    else:
+        # Auto-resumed due to timeout
+        start_monitoring()
 
 def prompt_restart_monitoring():
-    """Prompt the user to restart monitoring with auto-resume after 20 seconds."""
+    """Prompt the user to restart monitoring."""
     response_window = Toplevel()
     response_window.title("Restart Monitoring")
-    response_window.geometry("400x250")  # Made window taller
+    response_window.geometry("400x250")
     response_window.attributes('-topmost', True)
 
     frame = tk.Frame(response_window, padx=20, pady=20)
     frame.pack(fill=tk.BOTH, expand=True)
 
     label = tk.Label(frame, 
-                    text="Would you like to restart monitoring?\n\nAuto-resuming in 20 seconds...",
+                    text="Would you like to restart monitoring?",
                     font=("Arial", 11))
-    label.pack(pady=(0,30))  # Increased bottom padding
-
-    user_choice = {'made': False, 'value': False}
+    label.pack(pady=(0,30))
 
     def make_choice(choice):
-        user_choice['made'] = True
-        user_choice['value'] = choice
         response_window.destroy()
+        if choice:
+            start_monitoring()
+        else:
+            stop_monitoring()
 
     btn_frame = tk.Frame(frame)
     btn_frame.pack(fill='x')
 
-    # Made buttons taller with more padding
     tk.Button(btn_frame, 
               text="Yes",
               command=lambda: make_choice(True),
               bg="#28a745",
               fg="white",
-              font=("Arial", 10, "bold"),  # Made font bold
+              font=("Arial", 10, "bold"),
               relief="flat",
               cursor="hand2",
-              padx=40,    # Increased horizontal padding
-              pady=10).pack(side=tk.LEFT, padx=20)  # Increased button padding
+              padx=40,
+              pady=10).pack(side=tk.LEFT, padx=20)
 
     tk.Button(btn_frame, 
               text="No",
               command=lambda: make_choice(False),
               bg="#dc3545",
               fg="white",
-              font=("Arial", 10, "bold"),  # Made font bold
+              font=("Arial", 10, "bold"),
               relief="flat",
               cursor="hand2",
-              padx=40,    # Increased horizontal padding
-              pady=10).pack(side=tk.RIGHT, padx=20)  # Increased button padding
-
-    countdown_var = tk.StringVar()
-    countdown_label = tk.Label(frame, textvariable=countdown_var, font=("Arial", 10))
-    countdown_label.pack(pady=(30,0))  # Increased top padding
-
-    def update_countdown(seconds_left):
-        if not user_choice['made'] and seconds_left > 0:
-            countdown_var.set(f"Auto-resuming in {seconds_left} seconds...")
-            response_window.after(1000, update_countdown, seconds_left - 1)
-        elif not user_choice['made']:
-            make_choice(True)  # Auto-resume after timeout
-
-    update_countdown(20)
-    response_window.wait_window()
-
-    if user_choice['value']:
-        start_monitoring()
-    else:
-        stop_monitoring()
+              padx=40,
+              pady=10).pack(side=tk.RIGHT, padx=20)
 
 def update_status_indicator(active):
     """Update the status indicator (red/green circle)."""
