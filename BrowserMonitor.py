@@ -519,7 +519,8 @@ def select_monitoring_area():
             canvas.coords(rect_id, start_x, start_y, event.x, event.y)
 
     def end_selection(event):
-        nonlocal selection_started, selected_area
+        nonlocal selection_started
+        global selected_area  # Changed from nonlocal to global
         if selection_started:
             selection_started = False
             # Get the coordinates in the correct order (top-left to bottom-right)
@@ -551,6 +552,7 @@ def select_monitoring_area():
                  padx=20, pady=5).pack(side=tk.LEFT, padx=5)
 
     def confirm_selection():
+        global selected_area  # Added global declaration
         if selected_area:
             messagebox.showinfo("Success", "Area selected successfully!")
             selection_window.destroy()
