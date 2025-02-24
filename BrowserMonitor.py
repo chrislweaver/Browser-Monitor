@@ -20,6 +20,7 @@ monitoring = False  # Variable to track if monitoring is active
 last_screenshot = None  # Holds the last screenshot for comparison
 selected_area = None  # Will store (x1, y1, x2, y2) coordinates
 selection_window = None  # Will store the selection window reference
+show_monitored_area = False  # Toggle for showing monitored area
 
 def load_telegram_config():
     """Load Telegram configuration from a JSON file."""
@@ -781,10 +782,120 @@ def stop_monitoring():
     monitoring = False
     update_status_indicator(False)
 
+def toggle_area_highlight():
+    """Toggle the highlight of the monitored area."""
+    global show_monitored_area
+    show_monitored_area = not show_monitored_area
+
+    if selected_area:
+        if show_monitored_area:
+            # Show the highlighted area
+            screenshot = capture_window(selected_window)
+            if screenshot:
+                highlight_window = Toplevel()
+                highlight_window.title("Monitored Area")
+                highlight_window.attributes('-topmost', True)
+
+                # Create canvas and draw screenshot with highlight
+                photo = ImageTk.PhotoImage(screenshot)
+                canvas = tk.Canvas(highlight_window, width=screenshot.width, height=screenshot.height)
+                canvas.pack()
+                canvas.create_image(0, 0, image=photo, anchor='nw')
+                canvas.image = photo  # Keep reference
+
+                # Draw rectangle around monitored area
+                canvas.create_rectangle(selected_area[0], selected_area[1],
+                                     selected_area[2], selected_area[3],
+                                     outline='blue', width=2)
+
+                def on_close():
+                    global show_monitored_area
+                    show_monitored_area = False
+                    highlight_window.destroy()
+
+                highlight_window.protocol("WM_DELETE_WINDOW", on_close)
+        else:
+            # Close all toplevel windows that might be showing the highlight
+            for widget in root.winfo_children():
+                if isinstance(widget, Toplevel) and widget.title() == "Monitored Area":
+                    widget.destroy()
+    else:
+        messagebox.showinfo("Info", "No area is currently selected for monitoring.")
+
+def select_monitoring_area():
+    """Allow user to select a specific area of the window to monitor."""
+    global selected_area, selection_window, selected_window
+
+    if not selected_window:
+        messagebox.showerror("Error", "Please select a window first!")
+        return
+
+    # Capture current window
+    screenshot = capture_window(selected_window)
+    if screenshot is None:
+        messagebox.showerror("Error", "Could not capture window!")
+        return
+
+    # Create selection window
+    selection_window = Toplevel()
+    selection_window.title("Select Area to Monitor")
+    selection_window.attributes('-topmost', True)
+
+    # Convert PIL image to PhotoImage
+    photo = ImageTk.PhotoImage(screenshot)
+
+    # Create canvas for selection
+    canvas = tk.Canvas(selection_window, width=screenshot.width, height=screenshot.height)
+    canvas.pack()
+
+    # Display screenshot on canvas
+    canvas.create_image(0, 0, image=photo, anchor='nw')
+    canvas.image = photo  # Keep reference
+
+    # Variables for selection rectangle
+    start_x = start_y = 0
+    rect_id = None
+    selection_started = False
+
+    def start_selection(event):
+        nonlocal start_x, start_y, rect_id, selection_started
+        start_x, start_y = event.x, event.y
+        if rect_id:
+            canvas.delete(rect_id)
+        rect_id = canvas.create_rectangle(start_x, start_y, start_x, start_y, 
+                                        outline='red', width=2)
+        selection_started = True
+
+    def update_selection(event):
+        nonlocal rect_id, selection_started
+        if selection_started:
+            canvas.coords(rect_id, start_x, start_y, event.x, event.y)
+
+    def end_selection(event):
+        nonlocal selection_started
+        global selected_area
+        if selection_started:
+            selection_started = False
+            # Get the coordinates in the correct order (top-left to bottom-right)
+            x1, y1 = min(start_x, event.x), min(start_y, event.y)
+            x2, y2 = max(start_x, event.x), max(start_y, event.y)
+
+            # Store selected area
+            selected_area = (x1, y1, x2, y2)
+
+            # Close window and show confirmation
+            selection_window.destroy()
+            messagebox.showinfo("Success", "Area selected successfully!")
+
+    # Bind mouse events
+    canvas.bind('<Button-1>', start_selection)
+    canvas.bind('<B1-Motion>', update_selection)
+    canvas.bind('<ButtonRelease-1>', end_selection)
+
 # Initialize tkinter application
 root = tk.Tk()
 root.title("Browser Monitor")
-root.geometry("700x400")
+root.geometry("800x400")
 root.configure(bg="#f8f9fa")
 
 # Header Title
@@ -847,12 +958,33 @@ tk.Button(first_row_frame,
          cursor="hand2", 
          padx=10, 
          pady=5).pack(side=tk.LEFT, padx=10)
-# Add this button to your first row of buttons
+
 tk.Button(first_row_frame, 
          text="Select Area", 
          command=select_monitoring_area, 
          font=("Arial", 10), 
          bg="#17a2b8", 
+         fg="white", 
+         relief="flat", 
+         cursor="hand2", 
+         padx=10, 
+         pady=5).pack(side=tk.LEFT, padx=10)
+tk.Button(first_row_frame, 
+         text="Select Area", 
+         command=select_monitoring_area, 
+         font=("Arial", 10), 
+         bg="#17a2b8", 
+         fg="white", 
+         relief="flat", 
+         cursor="hand2", 
+         padx=10, 
+         pady=5).pack(side=tk.LEFT, padx=10)
+
+tk.Button(first_row_frame, 
+         text="Show/Hide Area", 
+         command=toggle_area_highlight, 
+         font=("Arial", 10), 
+         bg="#6c757d", 
          fg="white", 
          relief="flat", 
          cursor="hand2", 
