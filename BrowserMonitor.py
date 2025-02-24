@@ -31,7 +31,7 @@ def setup_telegram_config():
     """Create a window to setup Telegram configuration."""
     config_window = Toplevel()
     config_window.title("Telegram Configuration")
-    config_window.geometry("500x450")
+    config_window.geometry("500x500")
 
     # Create main frame with padding
     main_frame = tk.Frame(config_window, padx=20, pady=20)
@@ -492,7 +492,7 @@ def prompt_restart_monitoring():
     """Prompt the user to restart monitoring with auto-resume after 20 seconds."""
     response_window = Toplevel()
     response_window.title("Restart Monitoring")
-    response_window.geometry("400x200")
+    response_window.geometry("400x250")  # Made window taller
     response_window.attributes('-topmost', True)
 
     frame = tk.Frame(response_window, padx=20, pady=20)
@@ -501,7 +501,7 @@ def prompt_restart_monitoring():
     label = tk.Label(frame, 
                     text="Would you like to restart monitoring?\n\nAuto-resuming in 20 seconds...",
                     font=("Arial", 11))
-    label.pack(pady=(0,20))
+    label.pack(pady=(0,30))  # Increased bottom padding
 
     user_choice = {'made': False, 'value': False}
 
@@ -513,31 +513,32 @@ def prompt_restart_monitoring():
     btn_frame = tk.Frame(frame)
     btn_frame.pack(fill='x')
 
+    # Made buttons taller with more padding
     tk.Button(btn_frame, 
               text="Yes",
               command=lambda: make_choice(True),
               bg="#28a745",
               fg="white",
-              font=("Arial", 10),
+              font=("Arial", 10, "bold"),  # Made font bold
               relief="flat",
               cursor="hand2",
-              padx=30,
-              pady=5).pack(side=tk.LEFT, padx=10)
+              padx=40,    # Increased horizontal padding
+              pady=10).pack(side=tk.LEFT, padx=20)  # Increased button padding
 
     tk.Button(btn_frame, 
               text="No",
               command=lambda: make_choice(False),
               bg="#dc3545",
               fg="white",
-              font=("Arial", 10),
+              font=("Arial", 10, "bold"),  # Made font bold
               relief="flat",
               cursor="hand2",
-              padx=30,
-              pady=5).pack(side=tk.RIGHT, padx=10)
+              padx=40,    # Increased horizontal padding
+              pady=10).pack(side=tk.RIGHT, padx=20)  # Increased button padding
 
     countdown_var = tk.StringVar()
     countdown_label = tk.Label(frame, textvariable=countdown_var, font=("Arial", 10))
-    countdown_label.pack(pady=(20,0))
+    countdown_label.pack(pady=(30,0))  # Increased top padding
 
     def update_countdown(seconds_left):
         if not user_choice['made'] and seconds_left > 0:
