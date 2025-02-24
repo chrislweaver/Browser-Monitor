@@ -18,6 +18,8 @@ pygame.mixer.init()
 selected_window = None
 monitoring = False  # Variable to track if monitoring is active
 last_screenshot = None  # Holds the last screenshot for comparison
+selected_area = None  # Will store (x1, y1, x2, y2) coordinates
+selection_window = None  # Will store the selection window reference
 
 def load_telegram_config():
     """Load Telegram configuration from a JSON file."""
@@ -467,6 +469,172 @@ def monitor_window():
 
         last_screenshot = current_screenshot
 
+def select_monitoring_area():
+    """Allow user to select a specific area of the window to monitor."""
+    global selected_area, selection_window, selected_window
+
+    if not selected_window:
+        messagebox.showerror("Error", "Please select a window first!")
+        return
+
+    # Capture current window
+    screenshot = capture_window(selected_window)
+    if screenshot is None:
+        messagebox.showerror("Error", "Could not capture window!")
+        return
+
+    # Create selection window
+    selection_window = Toplevel()
+    selection_window.title("Select Area to Monitor")
+    selection_window.attributes('-topmost', True)
+
+    # Convert PIL image to PhotoImage
+    photo = ImageTk.PhotoImage(screenshot)
+
+    # Create canvas for selection
+    canvas = tk.Canvas(selection_window, width=screenshot.width, height=screenshot.height)
+    canvas.pack()
+
+    # Display screenshot on canvas
+    canvas.create_image(0, 0, image=photo, anchor='nw')
+    canvas.image = photo  # Keep reference
+
+    # Variables for selection rectangle
+    start_x = start_y = 0
+    rect_id = None
+    selection_started = False
+
+    def start_selection(event):
+        nonlocal start_x, start_y, rect_id, selection_started
+        start_x, start_y = event.x, event.y
+        if rect_id:
+            canvas.delete(rect_id)
+        rect_id = canvas.create_rectangle(start_x, start_y, start_x, start_y, 
+                                        outline='red', width=2)
+        selection_started = True
+
+    def update_selection(event):
+        nonlocal rect_id, selection_started
+        if selection_started:
+            canvas.coords(rect_id, start_x, start_y, event.x, event.y)
+
+    def end_selection(event):
+        nonlocal selection_started, selected_area
+        if selection_started:
+            selection_started = False
+            # Get the coordinates in the correct order (top-left to bottom-right)
+            x1, y1 = min(start_x, event.x), min(start_y, event.y)
+            x2, y2 = max(start_x, event.x), max(start_y, event.y)
+
+            # Store selected area
+            selected_area = (x1, y1, x2, y2)
+
+            # Create confirmation buttons
+            create_confirmation_buttons()
+
+    def create_confirmation_buttons():
+        button_frame = tk.Frame(selection_window)
+        button_frame.pack(pady=10)
+
+        tk.Button(button_frame, text="Confirm Selection",
+                 command=confirm_selection,
+                 bg="#28a745", fg="white",
+                 font=("Arial", 10),
+                 relief="flat", cursor="hand2",
+                 padx=20, pady=5).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(button_frame, text="Cancel",
+                 command=selection_window.destroy,
+                 bg="#dc3545", fg="white",
+                 font=("Arial", 10),
+                 relief="flat", cursor="hand2",
+                 padx=20, pady=5).pack(side=tk.LEFT, padx=5)
+
+    def confirm_selection():
+        if selected_area:
+            messagebox.showinfo("Success", "Area selected successfully!")
+            selection_window.destroy()
+        else:
+            messagebox.showerror("Error", "Please select an area first!")
+
+    # Bind mouse events
+    canvas.bind('<Button-1>', start_selection)
+    canvas.bind('<B1-Motion>', update_selection)
+    canvas.bind('<ButtonRelease-1>', end_selection)
+
+def monitor_window():
+    """Continuously monitor the selected window or area for visual changes."""
+    global monitoring, last_screenshot
+
+    if not selected_window:
+        messagebox.showerror("Error", "No window selected!")
+        return
+
+    # Capture the initial screenshot for comparison
+    full_screenshot = capture_window(selected_window)
+    if full_screenshot is None:
+        messagebox.showerror("Error", "Could not capture the selected window.")
+        return
+
+    # If area is selected, crop the screenshot
+    if selected_area:
+        last_screenshot = full_screenshot.crop(selected_area)
+    else:
+        last_screenshot = full_screenshot
+
+    while monitoring:
+        time.sleep(1)  # Check every 1 second
+
+        current_full_screenshot = capture_window(selected_window)
+        if not monitoring or current_full_screenshot is None:
+            break
+
+        # If area is selected, crop the current screenshot
+        if selected_area:
+            current_screenshot = current_full_screenshot.crop(selected_area)
+        else:
+            current_screenshot = current_full_screenshot
+
+        # Divide the images into tiles for comparison
+        tile_size = 100  # Adjust tile size based on desired granularity
+        last_tiles = divide_image_into_tiles(last_screenshot, tile_size)
+        current_tiles = divide_image_into_tiles(current_screenshot, tile_size)
+
+        # Create a copy of the current screenshot for overlay
+        overlay_image = current_screenshot.copy()
+        draw = ImageDraw.Draw(overlay_image)
+        significant_change_detected = False
+
+        # Check each tile for visual differences
+        for (box1, last_tile), (box2, current_tile) in zip(last_tiles, current_tiles):
+            diff = calculate_image_difference(last_tile, current_tile)
+            CHANGE_THRESHOLD = 10  # Set tolerance for differences
+            if diff > CHANGE_THRESHOLD:
+                significant_change_detected = True
+                print(f"Significant visual change detected in region {box1}: {diff}")
+                # Highlight the changed region on the overlay image
+                draw.rectangle(box1, outline="red", width=3)
+
+        if significant_change_detected:
+            play_sound()
+            # If using selected area, create full screenshot with highlighted area
+            if selected_area:
+                full_overlay = current_full_screenshot.copy()
+                draw = ImageDraw.Draw(full_overlay)
+                draw.rectangle(selected_area, outline="blue", width=2)  # Show monitored area
+                # Copy the changes onto the full screenshot
+                full_overlay.paste(overlay_image, (selected_area[0], selected_area[1]))
+                overlay_image = full_overlay
+
+            send_telegram_notification(overlay_image)
+
+            # Stop monitoring and display the overlay
+            monitoring = False
+            update_status_indicator(False)
+            display_overlay(overlay_image)
+
+        last_screenshot = current_screenshot
+        
 def display_overlay(overlay_image):
     """Display the overlayed screenshot with highlighted changes and start auto-resume countdown."""
     root.deiconify()
@@ -672,6 +840,17 @@ tk.Button(first_row_frame,
          command=play_sound, 
          font=("Arial", 10), 
          bg="#6c757d", 
+         fg="white", 
+         relief="flat", 
+         cursor="hand2", 
+         padx=10, 
+         pady=5).pack(side=tk.LEFT, padx=10)
+# Add this button to your first row of buttons
+tk.Button(first_row_frame, 
+         text="Select Area", 
+         command=select_monitoring_area, 
+         font=("Arial", 10), 
+         bg="#17a2b8", 
          fg="white", 
          relief="flat", 
          cursor="hand2", 
