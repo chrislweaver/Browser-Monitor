@@ -960,31 +960,10 @@ tk.Button(first_row_frame,
          pady=5).pack(side=tk.LEFT, padx=10)
 
 tk.Button(first_row_frame, 
-         text="Select Area", 
+         text="Select Monitor Area", 
          command=select_monitoring_area, 
          font=("Arial", 10), 
          bg="#17a2b8", 
-         fg="white", 
-         relief="flat", 
-         cursor="hand2", 
-         padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
-tk.Button(first_row_frame, 
-         text="Select Area", 
-         command=select_monitoring_area, 
-         font=("Arial", 10), 
-         bg="#17a2b8", 
-         fg="white", 
-         relief="flat", 
-         cursor="hand2", 
-         padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=10)
-
-tk.Button(first_row_frame, 
-         text="Show/Hide Area", 
-         command=toggle_area_highlight, 
-         font=("Arial", 10), 
-         bg="#6c757d", 
          fg="white", 
          relief="flat", 
          cursor="hand2", 
@@ -994,6 +973,17 @@ tk.Button(first_row_frame,
 # Second row of buttons
 second_row_frame = tk.Frame(main_button_frame, bg="#f8f9fa")
 second_row_frame.pack(pady=(15, 0))
+
+tk.Button(second_row_frame, 
+         text="Show/Hide Monitor Area", 
+         command=toggle_area_highlight, 
+         font=("Arial", 10), 
+         bg="#6c757d", 
+         fg="white", 
+         relief="flat", 
+         cursor="hand2", 
+         padx=10, 
+         pady=5).pack(side=tk.LEFT, padx=10)
 
 tk.Button(second_row_frame, 
          text="Telegram Setup", 
