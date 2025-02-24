@@ -31,7 +31,7 @@ def setup_telegram_config():
     """Create a window to setup Telegram configuration."""
     config_window = Toplevel()
     config_window.title("Telegram Configuration")
-    config_window.geometry("500x500")
+    config_window.geometry("500x450")
 
     # Create main frame with padding
     main_frame = tk.Frame(config_window, padx=20, pady=20)
@@ -592,7 +592,7 @@ def stop_monitoring():
 # Initialize tkinter application
 root = tk.Tk()
 root.title("Browser Monitor")
-root.geometry("700x350")
+root.geometry("700x400")
 root.configure(bg="#f8f9fa")
 
 # Header Title
