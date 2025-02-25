@@ -430,24 +430,24 @@ def monitor_window():
     else:
         last_screenshot = full_screenshot
 
-    consecutive_failures = 0  # Track consecutive capture failures
-    MAX_FAILURES = 3  # Maximum number of consecutive failures before showing error
+    consecutive_failures = 0
+    MAX_FAILURES = 3
 
     while monitoring:
         try:
-            time.sleep(1)  # Check every 1 second
+            time.sleep(1)
 
-            current_full_screenshot = capture_window(selected_window)
-            if not monitoring:
+            if not monitoring:  # Double-check monitoring status
                 break
 
+            current_full_screenshot = capture_window(selected_window)
             if current_full_screenshot is None:
                 consecutive_failures += 1
                 if consecutive_failures >= MAX_FAILURES:
                     print("Multiple capture failures, but continuing to monitor...")
                 continue
             else:
-                consecutive_failures = 0  # Reset counter on successful capture
+                consecutive_failures = 0
 
             # If area is selected, crop the current screenshot
             if selected_area:
@@ -456,49 +456,48 @@ def monitor_window():
                 current_screenshot = current_full_screenshot
 
             # Divide the images into tiles for comparison
-            tile_size = 100  # Adjust tile size based on desired granularity
+            tile_size = 100
             last_tiles = divide_image_into_tiles(last_screenshot, tile_size)
             current_tiles = divide_image_into_tiles(current_screenshot, tile_size)
 
-            # Create a copy of the current screenshot for overlay
             overlay_image = current_screenshot.copy()
             draw = ImageDraw.Draw(overlay_image)
             significant_change_detected = False
 
-            # Check each tile for visual differences
             for (box1, last_tile), (box2, current_tile) in zip(last_tiles, current_tiles):
+                if not monitoring:  # Check monitoring status during comparison
+                    return
                 diff = calculate_image_difference(last_tile, current_tile)
-                CHANGE_THRESHOLD = 10  # Set tolerance for differences
+                CHANGE_THRESHOLD = 10
                 if diff > CHANGE_THRESHOLD:
                     significant_change_detected = True
-                    print(f"Significant visual change detected in region {box1}: {diff}")
-                    # Highlight the changed region on the overlay image
                     draw.rectangle(box1, outline="red", width=3)
 
-            if significant_change_detected:
-                play_sound()
-                # If using selected area, create full screenshot with highlighted area
+            if significant_change_detected and monitoring:  # Final check before notification
+                # Immediately stop monitoring and update status
+                monitoring = False
+                update_status_indicator(False)
+
+                # Prepare final overlay image
                 if selected_area:
                     full_overlay = current_full_screenshot.copy()
                     draw = ImageDraw.Draw(full_overlay)
-                    draw.rectangle(selected_area, outline="blue", width=2)  # Show monitored area
-                    # Copy the changes onto the full screenshot
+                    draw.rectangle(selected_area, outline="blue", width=2)
                     full_overlay.paste(overlay_image, (selected_area[0], selected_area[1]))
                     overlay_image = full_overlay
 
+                # Send single notification
+                play_sound()
                 send_telegram_notification(overlay_image)
-
-                # Stop monitoring and display the overlay
-                monitoring = False
-                update_status_indicator(False)
                 display_overlay(overlay_image)
+                return  # Exit the function completely
 
-            last_screenshot = current_screenshot
+            if monitoring:  # Only update last_screenshot if still monitoring
+                last_screenshot = current_screenshot
 
         except Exception as e:
             print(f"Error in monitoring loop: {e}")
-            time.sleep(1)  # Wait before retrying
-            continue
+            time.sleep(1)
 
 def select_monitoring_area():
     """Allow user to select a specific area of the window to monitor."""
@@ -732,7 +731,7 @@ def display_overlay(overlay_image):
         start_monitoring()
 
 def prompt_restart_monitoring():
-    """Prompt the user to restart monitoring."""
+    """Prompt the user to restart monitoring with auto-resume after 20 seconds."""
     response_window = Toplevel()
     response_window.title("Restart Monitoring")
     response_window.geometry("400x250")
@@ -742,16 +741,16 @@ def prompt_restart_monitoring():
     frame.pack(fill=tk.BOTH, expand=True)
 
     label = tk.Label(frame, 
-                    text="Would you like to restart monitoring?",
+                    text="Would you like to restart monitoring?\n\nAuto-resuming in 20 seconds...",
                     font=("Arial", 11))
     label.pack(pady=(0,30))
 
+    user_choice = {'made': False, 'value': False}
+
     def make_choice(choice):
+        user_choice['made'] = True
+        user_choice['value'] = choice
         response_window.destroy()
-        if choice:
-            start_monitoring()
-        else:
-            stop_monitoring()
 
     btn_frame = tk.Frame(frame)
     btn_frame.pack(fill='x')
@@ -777,6 +776,29 @@ def prompt_restart_monitoring():
               cursor="hand2",
               padx=40,
               pady=10).pack(side=tk.RIGHT, padx=20)
+
+    countdown_var = tk.StringVar()
+    countdown_label = tk.Label(frame, textvariable=countdown_var, font=("Arial", 10))
+    countdown_label.pack(pady=(30,0))
+
+    def update_countdown(seconds_left):
+        if not user_choice['made'] and seconds_left > 0:
+            countdown_var.set(f"Auto-resuming in {seconds_left} seconds...")
+            response_window.after(1000, lambda: update_countdown(seconds_left - 1))
+        elif not user_choice['made']:
+            make_choice(True)  # Auto-resume after timeout
+
+    update_countdown(20)
+    response_window.wait_window()
+
+    if user_choice['value']:
+        # Reset monitoring state before restarting
+        global monitoring, last_screenshot
+        monitoring = False
+        last_screenshot = None
+        start_monitoring()
+    else:
+        stop_monitoring()
 
 def update_status_indicator(active):
     """Update the status indicator (red/green circle)."""
