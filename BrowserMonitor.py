@@ -10,17 +10,19 @@ import json
 import os
 import requests
 from datetime import datetime
+import queue
 
 # Initialize pygame mixer
 pygame.mixer.init()
 
 # Global variables
 selected_window = None
-monitoring = False  # Variable to track if monitoring is active
-last_screenshot = None  # Holds the last screenshot for comparison
-selected_area = None  # Will store (x1, y1, x2, y2) coordinates
-selection_window = None  # Will store the selection window reference
-show_monitored_area = False  # Toggle for showing monitored area
+monitoring = False
+last_screenshot = None
+selected_area = None
+selection_window = None
+show_monitored_area = False
+command_queue = queue.Queue()  # For thread-safe command handling
 
 def load_telegram_config():
     """Load Telegram configuration from a JSON file."""
@@ -30,6 +32,121 @@ def load_telegram_config():
     except FileNotFoundError:
         return None
 
+def send_telegram_message(message):
+    """Send a simple text message via Telegram."""
+    config = load_telegram_config()
+    if not config:
+        return
+
+    try:
+        bot_token = config['bot_token']
+        chat_id = config['chat_id']
+
+        response = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            data={
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "HTML"
+            }
+        )
+        if response.status_code != 200:
+            print(f"Failed to send Telegram message: {response.text}")
+    except Exception as e:
+        print(f"Error sending Telegram message: {e}")
+
+def check_telegram_commands():
+    """Check for incoming Telegram commands."""
+    global monitoring
+
+    config = load_telegram_config()
+    if not config:
+        return
+
+    try:
+        bot_token = config['bot_token']
+        last_update_id = 0
+
+        while hasattr(check_telegram_commands, 'running') and check_telegram_commands.running:
+            try:
+                # Get updates from Telegram
+                response = requests.get(
+                    f"https://api.telegram.org/bot{bot_token}/getUpdates",
+                    params={"offset": last_update_id + 1, "timeout": 30}
+                )
+
+                if response.status_code == 200:
+                    updates = response.json()
+
+                    if updates.get("ok") and updates.get("result"):
+                        for update in updates["result"]:
+                            last_update_id = update["update_id"]
+
+                            if "message" in update and "text" in update["message"]:
+                                command = update["message"]["text"].lower()
+
+                                # Add command to queue for main thread processing
+                                command_queue.put(command)
+
+            except Exception as e:
+                print(f"Error checking Telegram commands: {e}")
+
+            time.sleep(1)
+
+    except Exception as e:
+        print(f"Error in command checking loop: {e}")
+
+def process_telegram_commands():
+    """Process any pending Telegram commands from the main thread."""
+    try:
+        while not command_queue.empty():
+            command = command_queue.get_nowait()
+
+            if command == "/start_monitoring":
+                if not monitoring:
+                    root.after(0, start_monitoring)
+                    send_telegram_message("Monitoring started.")
+                else:
+                    send_telegram_message("Monitoring is already active.")
+
+            elif command == "/stop_monitoring":
+                if monitoring:
+                    root.after(0, stop_monitoring)
+                    send_telegram_message("Monitoring stopped.")
+                else:
+                    send_telegram_message("Monitoring is already stopped.")
+
+            elif command == "/status":
+                status = "active" if monitoring else "stopped"
+                send_telegram_message(f"Monitoring is currently {status}.")
+
+            elif command == "/help":
+                help_text = """
+Available commands:
+/start_monitoring - Start monitoring
+/stop_monitoring - Stop monitoring
+/status - Check monitoring status
+/help - Show this help message
+"""
+                send_telegram_message(help_text)
+    except Exception as e:
+        print(f"Error processing Telegram commands: {e}")
+    finally:
+        # Schedule next check
+        root.after(1000, process_telegram_commands)
+
+def start_telegram_command_checker():
+    """Start the Telegram command checking thread."""
+    check_telegram_commands.running = True
+    thread = threading.Thread(target=check_telegram_commands, daemon=True)
+    thread.start()
+    # Start command processing in main thread
+    root.after(1000, process_telegram_commands)
+
+def stop_telegram_command_checker():
+    """Stop the Telegram command checking thread."""
+    if hasattr(check_telegram_commands, 'running'):
+        check_telegram_commands.running = False
 def setup_telegram_config():
     """Create a window to setup Telegram configuration."""
     config_window = Toplevel()
@@ -48,63 +165,67 @@ def setup_telegram_config():
     3. Save the bot token provided
     4. Send a message to your bot
     5. Find your chat ID using @RawDataBot
+
+    Available commands after setup:
+    /start_monitoring - Start monitoring
+    /stop_monitoring - Stop monitoring
+    /status - Check monitoring status
+    /help - Show command list
     """
     tk.Label(main_frame, text=instructions, justify=tk.LEFT, wraplength=450).pack(pady=(0,20))
 
     # Bot Token section
-    tk.Label(main_frame, text="Bot Token:", anchor='w').pack(fill='x')
+    bot_frame = tk.Frame(main_frame)
+    bot_frame.pack(fill='x', pady=(0,10))
 
-    token_frame = tk.Frame(main_frame)
-    token_frame.pack(fill='x', pady=(0,10))
+    tk.Label(bot_frame, text="Bot Token:", anchor='w').pack(side=tk.LEFT)
 
-    token_entry = tk.Entry(token_frame, width=45, show="●")
-    token_entry.pack(side=tk.LEFT)
+    token_var = tk.StringVar()
+    token_entry = tk.Entry(bot_frame, width=45, show="●", textvariable=token_var)
+    token_entry.pack(side=tk.LEFT, padx=5)
 
+    token_visible = False
     def toggle_token():
-        if token_entry.cget('show') == "●":
-            token_entry.config(show="")
-            token_button.config(text="Hide")
-        else:
-            token_entry.config(show="●")
-            token_button.config(text="Show")
+        nonlocal token_visible
+        token_visible = not token_visible
+        token_entry.config(show="" if token_visible else "●")
+        token_button.config(text="Hide" if token_visible else "Show")
 
-    token_button = tk.Button(token_frame, text="Show", command=toggle_token,
+    token_button = tk.Button(bot_frame, text="Show", command=toggle_token,
                             bg="#6c757d", fg="white", relief="flat", padx=10)
-    token_button.pack(side=tk.LEFT, padx=5)
+    token_button.pack(side=tk.LEFT)
 
     # Chat ID section
-    tk.Label(main_frame, text="Chat ID:", anchor='w').pack(fill='x')
-
     chat_frame = tk.Frame(main_frame)
     chat_frame.pack(fill='x', pady=(0,20))
 
-    chat_entry = tk.Entry(chat_frame, width=45, show="●")
-    chat_entry.pack(side=tk.LEFT)
+    tk.Label(chat_frame, text="Chat ID:  ", anchor='w').pack(side=tk.LEFT)
 
+    chat_var = tk.StringVar()
+    chat_entry = tk.Entry(chat_frame, width=45, show="●", textvariable=chat_var)
+    chat_entry.pack(side=tk.LEFT, padx=5)
+
+    chat_visible = False
     def toggle_chat():
-        if chat_entry.cget('show') == "●":
-            chat_entry.config(show="")
-            chat_button.config(text="Hide")
-        else:
-            chat_entry.config(show="●")
-            chat_button.config(text="Show")
+        nonlocal chat_visible
+        chat_visible = not chat_visible
+        chat_entry.config(show="" if chat_visible else "●")
+        chat_button.config(text="Hide" if chat_visible else "Show")
 
     chat_button = tk.Button(chat_frame, text="Show", command=toggle_chat,
                            bg="#6c757d", fg="white", relief="flat", padx=10)
-    chat_button.pack(side=tk.LEFT, padx=5)
+    chat_button.pack(side=tk.LEFT)
 
     # Load existing config if any
     config = load_telegram_config()
     if config:
-        token_entry.delete(0, tk.END)  # Clear any existing text
-        chat_entry.delete(0, tk.END)   # Clear any existing text
-        token_entry.insert(0, config.get('bot_token', ''))
-        chat_entry.insert(0, config.get('chat_id', ''))
+        token_var.set(config.get('bot_token', ''))
+        chat_var.set(config.get('chat_id', ''))
 
     def save_config():
         config = {
-            'bot_token': token_entry.get().strip(),
-            'chat_id': chat_entry.get().strip()
+            'bot_token': token_var.get().strip(),
+            'chat_id': chat_var.get().strip()
         }
 
         # Validate inputs
@@ -115,8 +236,13 @@ def setup_telegram_config():
         try:
             with open('telegram_config.json', 'w') as f:
                 json.dump(config, f)
+
+            # Test the configuration
+            test_message = "Configuration test - If you receive this, your setup is working correctly!"
+            send_telegram_message(test_message)
+
             config_window.destroy()
-            messagebox.showinfo("Success", "Telegram configuration saved!")
+            messagebox.showinfo("Success", "Telegram configuration saved and tested!")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save configuration: {str(e)}")
 
@@ -147,7 +273,7 @@ def view_telegram_config():
 
     config_window = Toplevel()
     config_window.title("Current Telegram Configuration")
-    config_window.geometry("400x300")
+    config_window.geometry("400x350")  # Made taller for command list
 
     frame = tk.Frame(config_window, padx=20, pady=20)
     frame.pack(fill=tk.BOTH, expand=True)
@@ -166,6 +292,16 @@ def view_telegram_config():
     tk.Label(status_frame, text="Chat ID:", font=("Arial", 10, "bold")).pack(anchor='w', pady=(10,0))
     tk.Label(status_frame, text="[Configured]", fg="green").pack(anchor='w', padx=20)
 
+    # Show available commands
+    tk.Label(frame, text="\nAvailable Commands:", font=("Arial", 10, "bold")).pack(anchor='w', pady=(20,5))
+    commands = """
+    /start_monitoring - Start monitoring
+    /stop_monitoring - Stop monitoring
+    /status - Check monitoring status
+    /help - Show command list
+    """
+    tk.Label(frame, text=commands, justify=tk.LEFT).pack(anchor='w', padx=20)
+
     def remove_configuration():
         if messagebox.askyesno("Confirm", "Are you sure you want to remove the current configuration?"):
             try:
@@ -176,12 +312,9 @@ def view_telegram_config():
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to remove configuration: {str(e)}")
 
-    # Add some space before buttons
-    tk.Frame(frame, height=20).pack()
-
     # Button frame
     button_frame = tk.Frame(frame)
-    button_frame.pack(pady=10)
+    button_frame.pack(pady=20)
 
     # Remove Configuration button
     tk.Button(button_frame, 
@@ -206,7 +339,6 @@ def view_telegram_config():
               cursor="hand2",
               padx=20, 
               pady=5).pack(pady=10)
-                  
 def send_telegram_notification(overlay_image=None):
     """Send Telegram notification with screenshot when changes are detected."""
     config = load_telegram_config()
@@ -235,28 +367,30 @@ def send_telegram_notification(overlay_image=None):
 
         # If we have an image, send it
         if overlay_image:
-            # Save the image temporarily
-            temp_image_path = "temp_screenshot.png"
+            # Save the image temporarily with unique timestamp
+            temp_image_path = f"temp_screenshot_{int(time.time())}.png"
             overlay_image.save(temp_image_path)
 
-            # Send the image
-            with open(temp_image_path, 'rb') as image_file:
-                response = requests.post(
-                    f"{base_url}/sendPhoto",
-                    data={
-                        "chat_id": chat_id,
-                        "caption": "Screenshot showing detected changes (highlighted in red)"
-                    },
-                    files={
-                        "photo": image_file
-                    }
-                )
-
-            # Clean up temporary file
             try:
-                os.remove(temp_image_path)
-            except:
-                pass
+                # Send the image
+                with open(temp_image_path, 'rb') as image_file:
+                    response = requests.post(
+                        f"{base_url}/sendPhoto",
+                        data={
+                            "chat_id": chat_id,
+                            "caption": "Screenshot showing detected changes (highlighted in red)"
+                        },
+                        files={
+                            "photo": image_file
+                        }
+                    )
+            finally:
+                # Clean up temporary file
+                try:
+                    if os.path.exists(temp_image_path):
+                        os.remove(temp_image_path)
+                except Exception as e:
+                    print(f"Error removing temporary file: {e}")
 
         print("Telegram notification sent successfully!")
     except Exception as e:
@@ -278,10 +412,11 @@ def test_telegram_configuration():
 
 If you receive this message, your Telegram configuration is working correctly!
 
-Configuration details:
-• Bot connected successfully
-• Messages can be sent to your chat
-• Ready to send notifications
+Available commands:
+• /start_monitoring - Start monitoring
+• /stop_monitoring - Stop monitoring
+• /status - Check monitoring status
+• /help - Show this help message
         """
 
         response = requests.post(
@@ -317,7 +452,8 @@ def list_browser_windows():
     """List browser windows available for monitoring."""
     windows = gw.getWindowsWithTitle("")
     browser_windows = [
-        win for win in windows if win.title and any(browser in win.title for browser in ["Chrome", "Firefox", "Brave", "Vivaldi"])
+        win for win in windows if win.title and any(browser in win.title.lower() for browser in 
+        ["chrome", "firefox", "brave", "vivaldi", "edge", "opera"])
     ]
     return browser_windows
 
@@ -334,18 +470,30 @@ def select_window():
     selection_window.title("Select Window")
     selection_window.geometry("500x300")
 
+    # Add instructions
+    tk.Label(selection_window, 
+            text="Select the browser window you want to monitor:",
+            font=("Arial", 10),
+            pady=10).pack()
+
     button_frame = tk.Frame(selection_window)
     button_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
     for win in windows:
-        btn = tk.Button(button_frame, text=win.title, anchor="w", 
-                       command=lambda w=win: set_selected_window(w, selection_window))
+        btn = tk.Button(button_frame, 
+                       text=win.title, 
+                       anchor="w",
+                       command=lambda w=win: set_selected_window(w, selection_window),
+                       relief="flat",
+                       cursor="hand2",
+                       bg="#f8f9fa",
+                       pady=5)
         btn.pack(fill=tk.X, padx=5, pady=2, ipadx=5)
-
 def set_selected_window(window, selection_window):
     """Set the selected window for monitoring."""
-    global selected_window
+    global selected_window, selected_area
     selected_window = window
+    selected_area = None  # Reset selected area when new window is selected
     update_status_indicator(False)
     selected_window_label.config(
         text=f"Selected Browser Window:\n{selected_window.title}",
@@ -355,46 +503,39 @@ def set_selected_window(window, selection_window):
         fg="black",
     )
     selection_window.destroy()
+
 def capture_window(window):
-    """Capture a screenshot of the selected window."""
+    """Capture a screenshot of the selected window, working even with display off."""
     if not window:
         return None
     try:
-        # Add error checking for window state
-        if not window.isMinimized:
-            window.activate()
-            time.sleep(0.5)  # Reduced sleep time
+        # Direct screen capture without window activation
+        with mss.mss() as sct:
+            try:
+                # Get window coordinates
+                left = max(0, window.left)
+                top = max(0, window.top)
+                width = window.width
+                height = window.height
 
-            # Ensure coordinates are positive
-            left = max(0, window.left)
-            top = max(0, window.top)
-            width = window.width
-            height = window.height
+                # Create monitor dict for capture
+                monitor = {
+                    "left": left,
+                    "top": top,
+                    "width": width,
+                    "height": height
+                }
 
-            # Capture screenshot of the selected window
-            with mss.mss() as sct:
-                monitor = {"left": left, "top": top, "width": width, "height": height}
-                try:
-                    screenshot = sct.grab(monitor)
-                    img = Image.frombytes("RGB", (screenshot.width, screenshot.height), screenshot.rgb)
-                    return img
-                except Exception as e:
-                    print(f"Screenshot capture error: {e}")
-                    return None
-    except Exception as e:
-        print(f"Window activation error: {e}")
-        # Fallback capture attempt
-        try:
-            with mss.mss() as sct:
-                monitor = {"left": window.left, "top": window.top, 
-                          "width": window.width, "height": window.height}
+                # Capture without trying to activate window
                 screenshot = sct.grab(monitor)
                 img = Image.frombytes("RGB", (screenshot.width, screenshot.height), screenshot.rgb)
                 return img
-        except Exception as e:
-            print(f"Fallback capture error: {e}")
-            return None
-    return None
+            except Exception as e:
+                print(f"Screenshot capture error: {e}")
+                return None
+    except Exception as e:
+        print(f"Capture error: {e}")
+        return None
 
 def divide_image_into_tiles(image, tile_size):
     """Divide the screenshot into smaller tiles (regions) for more granular comparison."""
@@ -418,154 +559,6 @@ def calculate_image_difference(img1, img2):
         return 0
 
 def monitor_window():
-    """Continuously monitor the selected window for visual changes."""
-    global monitoring, last_screenshot
-
-    if not selected_window:
-        messagebox.showerror("Error", "No window selected!")
-        return
-
-    # Capture the initial screenshot for comparison
-    last_screenshot = capture_window(selected_window)
-
-    if last_screenshot is None:
-        messagebox.showerror("Error", "Could not capture the selected window.")
-        return
-
-    while monitoring:
-        time.sleep(1)  # Check every 1 second
-
-        current_screenshot = capture_window(selected_window)
-        if not monitoring or current_screenshot is None:
-            break
-
-        # Divide the images into tiles for comparison
-        tile_size = 100  # Adjust tile size based on desired granularity
-        last_tiles = divide_image_into_tiles(last_screenshot, tile_size)
-        current_tiles = divide_image_into_tiles(current_screenshot, tile_size)
-
-        # Create a copy of the current screenshot for overlay
-        overlay_image = current_screenshot.copy()
-        draw = ImageDraw.Draw(overlay_image)
-        significant_change_detected = False
-
-        # Check each tile for visual differences
-        for (box1, last_tile), (box2, current_tile) in zip(last_tiles, current_tiles):
-            diff = calculate_image_difference(last_tile, current_tile)
-            CHANGE_THRESHOLD = 10  # Set tolerance for differences
-            if diff > CHANGE_THRESHOLD:
-                significant_change_detected = True
-                print(f"Significant visual change detected in region {box1}: {diff}")
-                # Highlight the changed region on the overlay image
-                draw.rectangle(box1, outline="red", width=3)
-
-        if significant_change_detected:
-            play_sound()
-            send_telegram_notification(overlay_image)
-
-            # Stop monitoring and display the overlay
-            monitoring = False
-            update_status_indicator(False)
-            display_overlay(overlay_image)
-
-        last_screenshot = current_screenshot
-
-def select_monitoring_area():
-    """Allow user to select a specific area of the window to monitor."""
-    global selected_area, selection_window, selected_window
-
-    if not selected_window:
-        messagebox.showerror("Error", "Please select a window first!")
-        return
-
-    # Capture current window
-    screenshot = capture_window(selected_window)
-    if screenshot is None:
-        messagebox.showerror("Error", "Could not capture window!")
-        return
-
-    # Create selection window
-    selection_window = Toplevel()
-    selection_window.title("Select Area to Monitor")
-    selection_window.attributes('-topmost', True)
-
-    # Convert PIL image to PhotoImage
-    photo = ImageTk.PhotoImage(screenshot)
-
-    # Create canvas for selection
-    canvas = tk.Canvas(selection_window, width=screenshot.width, height=screenshot.height)
-    canvas.pack()
-
-    # Display screenshot on canvas
-    canvas.create_image(0, 0, image=photo, anchor='nw')
-    canvas.image = photo  # Keep reference
-
-    # Variables for selection rectangle
-    start_x = start_y = 0
-    rect_id = None
-    selection_started = False
-
-    def start_selection(event):
-        nonlocal start_x, start_y, rect_id, selection_started
-        start_x, start_y = event.x, event.y
-        if rect_id:
-            canvas.delete(rect_id)
-        rect_id = canvas.create_rectangle(start_x, start_y, start_x, start_y, 
-                                        outline='red', width=2)
-        selection_started = True
-
-    def update_selection(event):
-        nonlocal rect_id, selection_started
-        if selection_started:
-            canvas.coords(rect_id, start_x, start_y, event.x, event.y)
-
-    def end_selection(event):
-        nonlocal selection_started
-        global selected_area  # Changed from nonlocal to global
-        if selection_started:
-            selection_started = False
-            # Get the coordinates in the correct order (top-left to bottom-right)
-            x1, y1 = min(start_x, event.x), min(start_y, event.y)
-            x2, y2 = max(start_x, event.x), max(start_y, event.y)
-
-            # Store selected area
-            selected_area = (x1, y1, x2, y2)
-
-            # Create confirmation buttons
-            create_confirmation_buttons()
-
-    def create_confirmation_buttons():
-        button_frame = tk.Frame(selection_window)
-        button_frame.pack(pady=10)
-
-        tk.Button(button_frame, text="Confirm Selection",
-                 command=confirm_selection,
-                 bg="#28a745", fg="white",
-                 font=("Arial", 10),
-                 relief="flat", cursor="hand2",
-                 padx=20, pady=5).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(button_frame, text="Cancel",
-                 command=selection_window.destroy,
-                 bg="#dc3545", fg="white",
-                 font=("Arial", 10),
-                 relief="flat", cursor="hand2",
-                 padx=20, pady=5).pack(side=tk.LEFT, padx=5)
-
-    def confirm_selection():
-        global selected_area  # Added global declaration
-        if selected_area:
-            messagebox.showinfo("Success", "Area selected successfully!")
-            selection_window.destroy()
-        else:
-            messagebox.showerror("Error", "Please select an area first!")
-
-    # Bind mouse events
-    canvas.bind('<Button-1>', start_selection)
-    canvas.bind('<B1-Motion>', update_selection)
-    canvas.bind('<ButtonRelease-1>', end_selection)
-
-def monitor_window():
     """Continuously monitor the selected window or area for visual changes."""
     global monitoring, last_screenshot
 
@@ -585,59 +578,80 @@ def monitor_window():
     else:
         last_screenshot = full_screenshot
 
+    consecutive_failures = 0
+    MAX_FAILURES = 3
+    notification_sent = False  # Flag to prevent multiple notifications
+
     while monitoring:
-        time.sleep(1)  # Check every 1 second
+        try:
+            time.sleep(1)
 
-        current_full_screenshot = capture_window(selected_window)
-        if not monitoring or current_full_screenshot is None:
-            break
+            if not monitoring:  # Check monitoring status
+                break
 
-        # If area is selected, crop the current screenshot
-        if selected_area:
-            current_screenshot = current_full_screenshot.crop(selected_area)
-        else:
-            current_screenshot = current_full_screenshot
+            current_full_screenshot = capture_window(selected_window)
+            if current_full_screenshot is None:
+                consecutive_failures += 1
+                if consecutive_failures >= MAX_FAILURES:
+                    print("Multiple capture failures, but continuing to monitor...")
+                continue
+            else:
+                consecutive_failures = 0
 
-        # Divide the images into tiles for comparison
-        tile_size = 100  # Adjust tile size based on desired granularity
-        last_tiles = divide_image_into_tiles(last_screenshot, tile_size)
-        current_tiles = divide_image_into_tiles(current_screenshot, tile_size)
-
-        # Create a copy of the current screenshot for overlay
-        overlay_image = current_screenshot.copy()
-        draw = ImageDraw.Draw(overlay_image)
-        significant_change_detected = False
-
-        # Check each tile for visual differences
-        for (box1, last_tile), (box2, current_tile) in zip(last_tiles, current_tiles):
-            diff = calculate_image_difference(last_tile, current_tile)
-            CHANGE_THRESHOLD = 10  # Set tolerance for differences
-            if diff > CHANGE_THRESHOLD:
-                significant_change_detected = True
-                print(f"Significant visual change detected in region {box1}: {diff}")
-                # Highlight the changed region on the overlay image
-                draw.rectangle(box1, outline="red", width=3)
-
-        if significant_change_detected:
-            play_sound()
-            # If using selected area, create full screenshot with highlighted area
+            # If area is selected, crop the current screenshot
             if selected_area:
-                full_overlay = current_full_screenshot.copy()
-                draw = ImageDraw.Draw(full_overlay)
-                draw.rectangle(selected_area, outline="blue", width=2)  # Show monitored area
-                # Copy the changes onto the full screenshot
-                full_overlay.paste(overlay_image, (selected_area[0], selected_area[1]))
-                overlay_image = full_overlay
+                current_screenshot = current_full_screenshot.crop(selected_area)
+            else:
+                current_screenshot = current_full_screenshot
 
-            send_telegram_notification(overlay_image)
+            # Only proceed if not already notified
+            if not notification_sent:
+                # Divide the images into tiles for comparison
+                tile_size = 100
+                last_tiles = divide_image_into_tiles(last_screenshot, tile_size)
+                current_tiles = divide_image_into_tiles(current_screenshot, tile_size)
 
-            # Stop monitoring and display the overlay
-            monitoring = False
-            update_status_indicator(False)
-            display_overlay(overlay_image)
+                overlay_image = current_screenshot.copy()
+                draw = ImageDraw.Draw(overlay_image)
+                significant_change_detected = False
 
-        last_screenshot = current_screenshot
-        
+                for (box1, last_tile), (box2, current_tile) in zip(last_tiles, current_tiles):
+                    if not monitoring:  # Check monitoring status during comparison
+                        return
+                    diff = calculate_image_difference(last_tile, current_tile)
+                    CHANGE_THRESHOLD = 10
+                    if diff > CHANGE_THRESHOLD:
+                        significant_change_detected = True
+                        draw.rectangle(box1, outline="red", width=3)
+
+                if significant_change_detected:
+                    # Set notification flag before sending
+                    notification_sent = True
+
+                    # Prepare final overlay image
+                    final_overlay = None
+                    if selected_area:
+                        final_overlay = current_full_screenshot.copy()
+                        draw = ImageDraw.Draw(final_overlay)
+                        draw.rectangle(selected_area, outline="blue", width=2)
+                        final_overlay.paste(overlay_image, (selected_area[0], selected_area[1]))
+                    else:
+                        final_overlay = overlay_image
+
+                    # Stop monitoring and send notifications
+                    monitoring = False
+                    update_status_indicator(False)
+                    play_sound()
+                    send_telegram_notification(final_overlay)
+                    display_overlay(final_overlay)
+                    return  # Exit function completely
+
+            if monitoring:  # Only update if still monitoring
+                last_screenshot = current_screenshot
+
+        except Exception as e:
+            print(f"Error in monitoring loop: {e}")
+            time.sleep(1)
 def display_overlay(overlay_image):
     """Display the overlayed screenshot with highlighted changes and start auto-resume countdown."""
     root.deiconify()
@@ -719,6 +733,10 @@ def prompt_restart_monitoring():
     def make_choice(choice):
         response_window.destroy()
         if choice:
+            # Reset monitoring state before restarting
+            global monitoring, last_screenshot
+            monitoring = False
+            last_screenshot = None
             start_monitoring()
         else:
             stop_monitoring()
@@ -753,7 +771,7 @@ def update_status_indicator(active):
     canvas.delete("all")
     color = "green" if active else "red"
     canvas.create_oval(10, 10, 40, 40, fill=color, outline=color)
-    status_label.config(text="Monitoring..." if active else "Stopped", fg="green" if active else "red")
+    status_label.config(text="Monitoring..." if active else "Stopped", fg=color)
 
 def start_monitoring():
     """Start monitoring the selected window."""
@@ -773,6 +791,11 @@ def start_monitoring():
     if not monitoring:
         monitoring = True
         update_status_indicator(True)
+
+        # Start command checker if not already running
+        if not hasattr(check_telegram_commands, 'running'):
+            start_telegram_command_checker()
+
         thread = threading.Thread(target=monitor_window, daemon=True)
         thread.start()
 
@@ -785,43 +808,48 @@ def stop_monitoring():
 def toggle_area_highlight():
     """Toggle the highlight of the monitored area."""
     global show_monitored_area
+
+    if not selected_window:
+        messagebox.showinfo("Info", "Please select a window first!")
+        return
+
+    if not selected_area:
+        messagebox.showinfo("Info", "No area is currently selected for monitoring.\nUse 'Select Area' to define an area first.")
+        return
+
     show_monitored_area = not show_monitored_area
 
-    if selected_area:
-        if show_monitored_area:
-            # Show the highlighted area
-            screenshot = capture_window(selected_window)
-            if screenshot:
-                highlight_window = Toplevel()
-                highlight_window.title("Monitored Area")
-                highlight_window.attributes('-topmost', True)
+    if show_monitored_area:
+        # Show the highlighted area
+        screenshot = capture_window(selected_window)
+        if screenshot:
+            highlight_window = Toplevel()
+            highlight_window.title("Monitored Area")
+            highlight_window.attributes('-topmost', True)
 
-                # Create canvas and draw screenshot with highlight
-                photo = ImageTk.PhotoImage(screenshot)
-                canvas = tk.Canvas(highlight_window, width=screenshot.width, height=screenshot.height)
-                canvas.pack()
-                canvas.create_image(0, 0, image=photo, anchor='nw')
-                canvas.image = photo  # Keep reference
+            # Create canvas and draw screenshot with highlight
+            photo = ImageTk.PhotoImage(screenshot)
+            canvas = tk.Canvas(highlight_window, width=screenshot.width, height=screenshot.height)
+            canvas.pack()
+            canvas.create_image(0, 0, image=photo, anchor='nw')
+            canvas.image = photo  # Keep reference
 
-                # Draw rectangle around monitored area
-                canvas.create_rectangle(selected_area[0], selected_area[1],
-                                     selected_area[2], selected_area[3],
-                                     outline='blue', width=2)
+            # Draw rectangle around monitored area
+            canvas.create_rectangle(selected_area[0], selected_area[1],
+                                 selected_area[2], selected_area[3],
+                                 outline='blue', width=2)
 
-                def on_close():
-                    global show_monitored_area
-                    show_monitored_area = False
-                    highlight_window.destroy()
+            def on_close():
+                global show_monitored_area
+                show_monitored_area = False
+                highlight_window.destroy()
 
-                highlight_window.protocol("WM_DELETE_WINDOW", on_close)
-        else:
-            # Close all toplevel windows that might be showing the highlight
-            for widget in root.winfo_children():
-                if isinstance(widget, Toplevel) and widget.title() == "Monitored Area":
-                    widget.destroy()
+            highlight_window.protocol("WM_DELETE_WINDOW", on_close)
     else:
-        messagebox.showinfo("Info", "No area is currently selected for monitoring.")
-
+        # Close all toplevel windows that might be showing the highlight
+        for widget in root.winfo_children():
+            if isinstance(widget, Toplevel) and widget.title() == "Monitored Area":
+                widget.destroy()
 def select_monitoring_area():
     """Allow user to select a specific area of the window to monitor."""
     global selected_area, selection_window, selected_window
@@ -840,6 +868,13 @@ def select_monitoring_area():
     selection_window = Toplevel()
     selection_window.title("Select Area to Monitor")
     selection_window.attributes('-topmost', True)
+
+    # Add instructions label
+    instructions = """
+    Click and drag to select the area you want to monitor.
+    The selected area will be outlined in red.
+    """
+    tk.Label(selection_window, text=instructions, justify=tk.LEFT, pady=10).pack()
 
     # Convert PIL image to PhotoImage
     photo = ImageTk.PhotoImage(screenshot)
@@ -880,23 +915,106 @@ def select_monitoring_area():
             x1, y1 = min(start_x, event.x), min(start_y, event.y)
             x2, y2 = max(start_x, event.x), max(start_y, event.y)
 
+            # Ensure minimum size
+            if abs(x2 - x1) < 10 or abs(y2 - y1) < 10:
+                messagebox.showwarning("Warning", "Selected area is too small. Please select a larger area.")
+                return
+
             # Store selected area
             selected_area = (x1, y1, x2, y2)
 
-            # Close window and show confirmation
-            selection_window.destroy()
-            messagebox.showinfo("Success", "Area selected successfully!")
+            # Show confirmation buttons
+            show_confirmation_buttons()
+
+    def show_confirmation_buttons():
+        """Show confirmation buttons after area selection."""
+        button_frame = tk.Frame(selection_window)
+        button_frame.pack(pady=10)
+
+        # Add area dimensions label
+        if selected_area:
+            width = selected_area[2] - selected_area[0]
+            height = selected_area[3] - selected_area[1]
+            tk.Label(button_frame, 
+                    text=f"Selected Area: {width}x{height} pixels",
+                    font=("Arial", 10)).pack(pady=(0, 10))
+
+        tk.Button(button_frame, text="Confirm Selection",
+                 command=confirm_selection,
+                 bg="#28a745", fg="white",
+                 font=("Arial", 10),
+                 relief="flat", cursor="hand2",
+                 padx=20, pady=5).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(button_frame, text="Reset Selection",
+                 command=reset_selection,
+                 bg="#ffc107", fg="white",
+                 font=("Arial", 10),
+                 relief="flat", cursor="hand2",
+                 padx=20, pady=5).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(button_frame, text="Cancel",
+                 command=selection_window.destroy,
+                 bg="#dc3545", fg="white",
+                 font=("Arial", 10),
+                 relief="flat", cursor="hand2",
+                 padx=20, pady=5).pack(side=tk.LEFT, padx=5)
+
+    def confirm_selection():
+        global selected_area
+        if selected_area:
+            if monitoring:
+                # If currently monitoring, ask to restart
+                if messagebox.askyesno("Restart Required", 
+                                     "Changing the monitored area requires restarting the monitoring. Continue?"):
+                    stop_monitoring()
+                    selection_window.destroy()
+                    messagebox.showinfo("Success", "Area selected successfully! You can now restart monitoring.")
+                else:
+                    return
+            else:
+                selection_window.destroy()
+                messagebox.showinfo("Success", "Area selected successfully!")
+        else:
+            messagebox.showerror("Error", "Please select an area first!")
+
+    def reset_selection():
+        """Reset the selection and remove the rectangle."""
+        global selected_area
+        nonlocal rect_id
+        selected_area = None
+        if rect_id:
+            canvas.delete(rect_id)
+            rect_id = None
+        # Remove confirmation buttons if they exist
+        for widget in selection_window.winfo_children():
+            if isinstance(widget, tk.Frame) and widget != canvas:
+                widget.destroy()
 
     # Bind mouse events
     canvas.bind('<Button-1>', start_selection)
     canvas.bind('<B1-Motion>', update_selection)
     canvas.bind('<ButtonRelease-1>', end_selection)
 
+def on_closing():
+    """Handle application closing."""
+    if monitoring:
+        if not messagebox.askyesno("Confirm Exit", 
+                                  "Monitoring is still active. Are you sure you want to exit?"):
+            return
+    stop_telegram_command_checker()
+    root.quit()
 # Initialize tkinter application
 root = tk.Tk()
 root.title("Browser Monitor")
 root.geometry("800x475")
 root.configure(bg="#f8f9fa")
+
+# Set program icon (if available)
+try:
+    root.iconbitmap('monitor_icon.ico')
+except:
+    pass
 
 # Header Title
 header = tk.Label(root, text="Browser Change Monitor", font=("Arial", 18, "bold"), bg="#f8f9fa", fg="#343a40")
@@ -911,7 +1029,7 @@ selected_window_label.pack(pady=5, ipadx=10, ipady=10)
 main_button_frame = tk.Frame(root, bg="#f8f9fa")
 main_button_frame.pack(pady=10)
 
-# First row of buttons
+# First row of buttons - Core Functions
 first_row_frame = tk.Frame(main_button_frame, bg="#f8f9fa")
 first_row_frame.pack(pady=(15, 15))  # Equal padding top and bottom
 
@@ -925,7 +1043,7 @@ tk.Button(first_row_frame,
          relief="flat", 
          cursor="hand2", 
          padx=10, 
-         pady=5).pack(side=tk.LEFT, padx=20)  # Increased padding between buttons
+         pady=5).pack(side=tk.LEFT, padx=20)
 
 tk.Button(first_row_frame, 
          text="Start Monitoring", 
@@ -949,11 +1067,10 @@ tk.Button(first_row_frame,
          padx=10, 
          pady=5).pack(side=tk.LEFT, padx=20)
 
-# Second row of buttons
+# Second row of buttons - Telegram Configuration
 second_row_frame = tk.Frame(main_button_frame, bg="#f8f9fa")
 second_row_frame.pack(pady=(15, 15))  # Equal padding top and bottom
 
-# Telegram related buttons
 tk.Button(second_row_frame, 
          text="Telegram Setup", 
          command=setup_telegram_config, 
@@ -987,11 +1104,10 @@ tk.Button(second_row_frame,
          padx=10, 
          pady=5).pack(side=tk.LEFT, padx=20)
 
-# Third row of buttons
+# Third row of buttons - Utilities
 third_row_frame = tk.Frame(main_button_frame, bg="#f8f9fa")
 third_row_frame.pack(pady=(15, 15))  # Equal padding top and bottom
 
-# Area selection and utility buttons
 tk.Button(third_row_frame, 
          text="Select Area", 
          command=select_monitoring_area, 
@@ -1027,7 +1143,7 @@ tk.Button(third_row_frame,
 
 tk.Button(third_row_frame, 
          text="Exit", 
-         command=root.quit, 
+         command=on_closing, 
          font=("Arial", 10), 
          bg="#343a40", 
          fg="white", 
@@ -1048,6 +1164,13 @@ status_label.grid(row=0, column=1)
 
 # Initialize status indicator as "Stopped"
 update_status_indicator(False)
+
+# Set window close handler
+root.protocol("WM_DELETE_WINDOW", on_closing)
+
+# Start checking for Telegram commands if configured
+if load_telegram_config():
+    start_telegram_command_checker()
 
 # Start the application
 root.mainloop()
