@@ -437,7 +437,7 @@ def monitor_window():
         try:
             time.sleep(1)
 
-            if not monitoring:  # Double-check monitoring status
+            if not monitoring:  # Check monitoring status
                 break
 
             current_full_screenshot = capture_window(selected_window)
@@ -473,26 +473,28 @@ def monitor_window():
                     significant_change_detected = True
                     draw.rectangle(box1, outline="red", width=3)
 
-            if significant_change_detected and monitoring:  # Final check before notification
-                # Immediately stop monitoring and update status
+            if significant_change_detected:
+                # Stop monitoring immediately
                 monitoring = False
                 update_status_indicator(False)
 
                 # Prepare final overlay image
+                final_overlay = None
                 if selected_area:
-                    full_overlay = current_full_screenshot.copy()
-                    draw = ImageDraw.Draw(full_overlay)
+                    final_overlay = current_full_screenshot.copy()
+                    draw = ImageDraw.Draw(final_overlay)
                     draw.rectangle(selected_area, outline="blue", width=2)
-                    full_overlay.paste(overlay_image, (selected_area[0], selected_area[1]))
-                    overlay_image = full_overlay
+                    final_overlay.paste(overlay_image, (selected_area[0], selected_area[1]))
+                else:
+                    final_overlay = overlay_image
 
-                # Send single notification
+                # Send notifications and display overlay
                 play_sound()
-                send_telegram_notification(overlay_image)
-                display_overlay(overlay_image)
-                return  # Exit the function completely
+                send_telegram_notification(final_overlay)
+                display_overlay(final_overlay)
+                return  # Exit function completely
 
-            if monitoring:  # Only update last_screenshot if still monitoring
+            if monitoring:  # Only update if still monitoring
                 last_screenshot = current_screenshot
 
         except Exception as e:
