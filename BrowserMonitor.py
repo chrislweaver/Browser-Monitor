@@ -11,6 +11,7 @@ import os
 import requests
 from datetime import datetime
 import queue
+from tkinter import ttk
 
 # Initialize pygame mixer
 pygame.mixer.init()
@@ -1004,6 +1005,74 @@ def on_closing():
             return
     stop_telegram_command_checker()
     root.quit()
+def open_alert_settings():
+    """Open a window to configure alert settings"""
+    settings_window = tk.Toplevel(root)
+    settings_window.title("Alert Settings")
+    settings_window.geometry("400x500")
+    settings_window.configure(bg="#f8f9fa")
+
+    # Load existing settings or use defaults
+    try:
+        with open('alert_settings.json', 'r') as f:
+            settings = json.load(f)
+    except FileNotFoundError:
+        settings = {
+            'min_change_percent': 5,
+            'cooldown_period': 60,
+            'notification_sound': True,
+            'telegram_alerts': True,
+            'desktop_notifications': True
+        }
+
+    # Create settings controls
+    tk.Label(settings_window, text="Alert Settings", font=("Arial", 14, "bold"), 
+            bg="#f8f9fa").pack(pady=10)
+
+    # Minimum change percentage
+    tk.Label(settings_window, text="Minimum change percentage to trigger alert:", 
+            bg="#f8f9fa").pack(pady=5)
+    change_scale = ttk.Scale(settings_window, from_=1, to=50, 
+                            value=settings['min_change_percent'])
+    change_scale.pack()
+
+    # Cooldown period
+    tk.Label(settings_window, text="Cooldown period between alerts (seconds):", 
+            bg="#f8f9fa").pack(pady=5)
+    cooldown_scale = ttk.Scale(settings_window, from_=10, to=300, 
+                              value=settings['cooldown_period'])
+    cooldown_scale.pack()
+
+    # Checkboxes for notification types
+    sound_var = tk.BooleanVar(value=settings['notification_sound'])
+    tk.Checkbutton(settings_window, text="Play sound on alert", variable=sound_var, 
+                   bg="#f8f9fa").pack(pady=5)
+
+    telegram_var = tk.BooleanVar(value=settings['telegram_alerts'])
+    tk.Checkbutton(settings_window, text="Send Telegram notifications", 
+                   variable=telegram_var, bg="#f8f9fa").pack(pady=5)
+
+    desktop_var = tk.BooleanVar(value=settings['desktop_notifications'])
+    tk.Checkbutton(settings_window, text="Show desktop notifications", 
+                   variable=desktop_var, bg="#f8f9fa").pack(pady=5)
+
+    def save_settings():
+        settings = {
+            'min_change_percent': change_scale.get(),
+            'cooldown_period': cooldown_scale.get(),
+            'notification_sound': sound_var.get(),
+            'telegram_alerts': telegram_var.get(),
+            'desktop_notifications': desktop_var.get()
+        }
+        with open('alert_settings.json', 'w') as f:
+            json.dump(settings, f)
+        settings_window.destroy()
+
+    # Save button
+    tk.Button(settings_window, text="Save Settings", command=save_settings,
+              bg="#28a745", fg="white", font=("Arial", 10),
+              relief="flat", cursor="hand2", padx=10, pady=5).pack(pady=20)
+
 # Initialize tkinter application
 root = tk.Tk()
 root.title("Browser Monitor")
@@ -1102,6 +1171,17 @@ tk.Button(second_row_frame,
          relief="flat", 
          cursor="hand2", 
          padx=10, 
+         pady=5).pack(side=tk.LEFT, padx=20)
+
+tk.Button(second_row_frame,
+         text="Alert Settings",
+         command=open_alert_settings,
+         font=("Arial", 10),
+         bg="#17a2b8",
+         fg="white",
+         relief="flat",
+         cursor="hand2",
+         padx=10,
          pady=5).pack(side=tk.LEFT, padx=20)
 
 # Third row of buttons - Utilities
